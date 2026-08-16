@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: var(--font-playfair), "Georgia", serif;
+  --font-sans: var(--font-inter), "Nunito", sans-serif;
+}
+
+:root {
+  background: #faf9f6;
+  color: #3a2118;
+}
+
+body {
+  margin: 0;
+}

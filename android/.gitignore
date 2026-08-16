@@ -1,0 +1,19 @@
+# Android
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Keys and secrets
+*.jks
+*.keystore
+google-services.json
+
+# Generated
+/app/build

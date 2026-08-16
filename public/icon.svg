@@ -1,0 +1,28 @@
+<svg width="32" height="32" viewBox="0 0 100 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Left Ear -->
+  <ellipse cx="36" cy="28" rx="8" ry="26" fill="#8B4513" transform="rotate(-10 36 28)" />
+  <ellipse cx="36" cy="28" rx="4.5" ry="20" fill="#C08B6B" transform="rotate(-10 36 28)" />
+  <!-- Right Ear -->
+  <ellipse cx="64" cy="28" rx="8" ry="26" fill="#8B4513" transform="rotate(10 64 28)" />
+  <ellipse cx="64" cy="28" rx="4.5" ry="20" fill="#C08B6B" transform="rotate(10 64 28)" />
+  <!-- Head -->
+  <circle cx="50" cy="62" r="22" fill="#D2B48C" />
+  <!-- Eyes -->
+  <circle cx="42" cy="58" r="2.5" fill="#3E2215" />
+  <circle cx="58" cy="58" r="2.5" fill="#3E2215" />
+  <!-- Nose -->
+  <ellipse cx="50" cy="65" rx="2" ry="1.5" fill="#3E2215" />
+  <!-- Mouth -->
+  <path d="M 47 68 Q 50 72 53 68" stroke="#3E2215" stroke-width="1.2" fill="none" stroke-linecap="round" />
+  <!-- Body -->
+  <ellipse cx="50" cy="108" rx="24" ry="28" fill="#8B4513" />
+  <!-- Belly -->
+  <ellipse cx="50" cy="110" rx="14" ry="18" fill="#D2B48C" />
+  <!-- Coins on stomach -->
+  <ellipse cx="50" cy="104" rx="10" ry="3.5" fill="#C8913B" stroke="#A67424" stroke-width="1" />
+  <ellipse cx="50" cy="109" rx="10" ry="3.5" fill="#D4A04A" stroke="#B8892E" stroke-width="1" />
+  <ellipse cx="50" cy="114" rx="10" ry="3.5" fill="#E0B05A" stroke="#C89838" stroke-width="1" />
+  <!-- Feet -->
+  <ellipse cx="34" cy="132" rx="10" ry="5" fill="#8B4513" />
+  <ellipse cx="66" cy="132" rx="10" ry="5" fill="#8B4513" />
+</svg>

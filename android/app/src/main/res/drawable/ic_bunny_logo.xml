@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="80dp"
+    android:viewportWidth="100"
+    android:viewportHeight="140">
+
+    <!-- Left Ear -->
+    <group android:pivotX="36" android:pivotY="28" android:rotation="-10">
+        <path android:fillColor="#8B4513" android:pathData="M 36,2 c 4.4,0 8,11.6 8,26 c 0,14.4 -3.6,26 -8,26 c -4.4,0 -8,-11.6 -8,-26 c 0,-14.4 3.6,-26 8,-26 z" />
+        <path android:fillColor="#C08B6B" android:pathData="M 36,8 c 2.5,0 4.5,9 4.5,20 c 0,11 -2,20 -4.5,20 c -2.5,0 -4.5,-9 -4.5,-20 c 0,-11 2,-20 4.5,-20 z" />
+    </group>
+
+    <!-- Right Ear -->
+    <group android:pivotX="64" android:pivotY="28" android:rotation="10">
+        <path android:fillColor="#8B4513" android:pathData="M 64,2 c 4.4,0 8,11.6 8,26 c 0,14.4 -3.6,26 -8,26 c -4.4,0 -8,-11.6 -8,-26 c 0,-14.4 3.6,-26 8,-26 z" />
+        <path android:fillColor="#C08B6B" android:pathData="M 64,8 c 2.5,0 4.5,9 4.5,20 c 0,11 -2,20 -4.5,20 c -2.5,0 -4.5,-9 -4.5,-20 c 0,-11 2,-20 4.5,-20 z" />
+    </group>
+
+    <!-- Head -->
+    <path android:fillColor="#D2B48C" android:pathData="M 50,40 c 12.1,0 22,9.9 22,22 c 0,12.1 -9.9,22 -22,22 c -12.1,0 -22,-9.9 -22,-22 c 0,-12.1 9.9,-22 22,-22 z" />
+
+    <!-- Eyes -->
+    <path android:fillColor="#3E2215" android:pathData="M 42,55.5 c 1.4,0 2.5,1.1 2.5,2.5 c 0,1.4 -1.1,2.5 -2.5,2.5 c -1.4,0 -2.5,-1.1 -2.5,-2.5 c 0,-1.4 1.1,-2.5 2.5,-2.5 z" />
+    <path android:fillColor="#3E2215" android:pathData="M 58,55.5 c 1.4,0 2.5,1.1 2.5,2.5 c 0,1.4 -1.1,2.5 -2.5,2.5 c -1.4,0 -2.5,-1.1 -2.5,-2.5 c 0,-1.4 1.1,-2.5 2.5,-2.5 z" />
+
+    <!-- Nose -->
+    <path android:fillColor="#3E2215" android:pathData="M 50,63.5 c 1.1,0 2,0.7 2,1.5 c 0,0.8 -0.9,1.5 -2,1.5 c -1.1,0 -2,-0.7 -2,-1.5 c 0,-0.8 0.9,-1.5 2,-1.5 z" />
+
+    <!-- Mouth -->
+    <path android:strokeColor="#3E2215" android:strokeWidth="1.2" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M 47,68 Q 50,72 53,68" />
+
+    <!-- Body -->
+    <path android:fillColor="#8B4513" android:pathData="M 50,80 c 13.3,0 24,12.5 24,28 c 0,15.5 -10.7,28 -24,28 c -13.3,0 -24,-12.5 -24,-28 c 0,-15.5 10.7,-28 24,-28 z" />
+
+    <!-- Belly -->
+    <path android:fillColor="#D2B48C" android:pathData="M 50,92 c 7.7,0 14,8.1 14,18 c 0,9.9 -6.3,18 -14,18 c -7.7,0 -14,-8.1 -14,-18 c 0,-9.9 6.3,-18 14,-18 z" />
+
+    <!-- Coins on stomach -->
+    <path android:fillColor="#C8913B" android:strokeColor="#A67424" android:strokeWidth="1" android:pathData="M 50,100.5 c 5.5,0 10,1.6 10,3.5 c 0,1.9 -4.5,3.5 -10,3.5 c -5.5,0 -10,-1.6 -10,-3.5 c 0,-1.9 4.5,-3.5 10,-3.5 z" />
+    <path android:fillColor="#D4A04A" android:strokeColor="#B8892E" android:strokeWidth="1" android:pathData="M 50,105.5 c 5.5,0 10,1.6 10,3.5 c 0,1.9 -4.5,3.5 -10,3.5 c -5.5,0 -10,-1.6 -10,-3.5 c 0,-1.9 4.5,-3.5 10,-3.5 z" />
+    <path android:fillColor="#E0B05A" android:strokeColor="#C89838" android:strokeWidth="1" android:pathData="M 50,110.5 c 5.5,0 10,1.6 10,3.5 c 0,1.9 -4.5,3.5 -10,3.5 c -5.5,0 -10,-1.6 -10,-3.5 c 0,-1.9 4.5,-3.5 10,-3.5 z" />
+
+    <!-- Feet -->
+    <path android:fillColor="#8B4513" android:pathData="M 34,127 c 5.5,0 10,2.2 10,5 c 0,2.8 -4.5,5 -10,5 c -5.5,0 -10,-2.2 -10,-5 c 0,-2.8 4.5,-5 10,-5 z" />
+    <path android:fillColor="#8B4513" android:pathData="M 66,127 c 5.5,0 10,2.2 10,5 c 0,2.8 -4.5,5 -10,5 c -5.5,0 -10,-2.2 -10,-5 c 0,-2.8 4.5,-5 10,-5 z" />
+
+</vector>
