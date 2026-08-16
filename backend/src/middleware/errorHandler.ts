@@ -25,9 +25,10 @@ export function errorHandler(
     });
     return;
   }
+
   console.error('Unhandled error:', err);
   res.status(500).json({
     status: 'error',
-    message: 'An unexpected error occurred.',
+    message: err.message || 'An unexpected error occurred.',
   });
 }

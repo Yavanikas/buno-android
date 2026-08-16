@@ -4,9 +4,10 @@ data class Expense(
     val id: String,
     val amount: Double,
     val category: ExpenseCategory,
-    val note: String,
+    val note: String = "",
     val date: String, // ISO date string: "2026-07-01"
-    val source: String = "manual"
+    val source: String = "manual",
+    val budgetId: String? = null
 )
 
 enum class ExpenseCategory(val displayName: String) {

@@ -1,9 +1,6 @@
 package com.buno.app.ui.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,7 +15,6 @@ import com.buno.app.ui.screen.RegisterScreen
 import com.buno.app.ui.screen.SettingsScreen
 import com.buno.app.ui.screen.SplashScreen
 import com.buno.app.ui.screen.TransactionsScreen
-import com.buno.app.viewmodel.AuthViewModel
 
 @Composable
 fun BunoNavGraph(
@@ -84,16 +80,21 @@ fun BunoNavGraph(
                 onNavigateToPatterns = { navController.navigate(Screen.Patterns.route) },
                 onNavigateToBankSync = { navController.navigate(Screen.BankSync.route) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                onNavigateToPremium = { navController.navigate(Screen.Premium.route) }
+                onNavigateToPremium = { navController.navigate(Screen.Premium.route) },
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
-        }
-
-        composable(Screen.BankSync.route) {
-            BankSyncScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Transactions.route) {
             TransactionsScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.BankSync.route) {
+            BankSyncScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Patterns.route) {

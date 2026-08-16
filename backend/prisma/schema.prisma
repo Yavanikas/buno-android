@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(cuid())
-  email         String        @unique
+  id            String         @id @default(cuid())
+  email         String         @unique
   passwordHash  String
   name          String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   budgets       Budget[]
   transactions  Transaction[]
+  refreshTokens RefreshToken[]
   syncs         Sync[]
   premiums      Premium[]
   auditLogs     AuditLog[]
@@ -24,35 +25,50 @@ model User {
 }
 
 model Budget {
-  id            String   @id @default(cuid())
+  id            String        @id @default(cuid())
   userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  monthlyLimit  Decimal  @db.Decimal(12, 2)
-  currency      String   @default("INR")
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monthlyLimit  Decimal       @db.Decimal(12, 2)
+  currency      String        @default("INR")
   month         Int
   year          Int
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  transactions  Transaction[]
 
   @@unique([userId, month, year])
   @@index([userId])
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amount      Decimal  @db.Decimal(12, 2)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  budgetId    String?
+  budget      Budget?   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  amount      Decimal   @db.Decimal(12, 2)
   category    String
   note        String?
-  date        DateTime
-  source      String   @default("manual")
-  externalId  String?  @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  date        DateTime  @default(now())
+  source      String    @default("manual")
+  externalId  String?   @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId])
+  @@index([budgetId])
   @@index([userId, date])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Sync {
