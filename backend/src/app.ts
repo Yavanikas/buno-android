@@ -11,6 +11,38 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ─── Root Info Route ──────────────────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    name: 'Buno Backend API',
+    version: '1.0.0',
+    description: 'Qualitative Calm Budgeting API',
+    endpoints: {
+      health: 'GET /health',
+      auth: {
+        register: 'POST /api/auth/register',
+        login: 'POST /api/auth/login',
+        refresh: 'POST /api/auth/refresh',
+        logout: 'POST /api/auth/logout',
+        me: 'GET /api/auth/me',
+      },
+      budgets: {
+        list: 'GET /api/budgets',
+        create: 'POST /api/budgets',
+        get: 'GET /api/budgets/:id',
+        update: 'PATCH /api/budgets/:id',
+        delete: 'DELETE /api/budgets/:id',
+      },
+      transactions: {
+        list: 'GET /api/budgets/:budgetId/transactions',
+        create: 'POST /api/budgets/:budgetId/transactions',
+        delete: 'DELETE /api/budgets/:budgetId/transactions/:id',
+      },
+    },
+  });
+});
+
 // ─── Health Route ─────────────────────────────────────────────────────────────
 app.use('/health', healthRouter);
 
