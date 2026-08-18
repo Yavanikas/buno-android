@@ -7,6 +7,7 @@ class InMemoryStore {
   transactions: any[] = [];
   refreshTokens: any[] = [];
   auditLogs: any[] = [];
+  syncs: any[] = [];
 
   private generateId(prefix: string = 'c'): string {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
@@ -181,7 +182,10 @@ class InMemoryStore {
       return list;
     },
     findUnique: async ({ where }: any) => {
-      return this.transactions.find((t) => t.id === where.id) || null;
+      return (
+        this.transactions.find((t) => t.id === where.id || (where.externalId && t.externalId === where.externalId)) ||
+        null
+      );
     },
     create: async ({ data }: any) => {
       const tx = {
@@ -227,6 +231,40 @@ class InMemoryStore {
     },
     findMany: async ({ where }: any = {}) => {
       return this.auditLogs.filter((l) => !where?.userId || l.userId === where.userId);
+    },
+  };
+
+  sync = {
+    create: async ({ data }: any) => {
+      const sync = {
+        id: this.generateId('sync'),
+        userId: data.userId,
+        budgetId: data.budgetId || null,
+        provider: data.provider,
+        status: data.status || 'pending',
+        accountId: data.accountId || null,
+        transactionsFetched: data.transactionsFetched || 0,
+        transactionsCreated: data.transactionsCreated || 0,
+        duplicatesSkipped: data.duplicatesSkipped || 0,
+        lastSyncAt: data.lastSyncAt || null,
+        error: data.error || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      this.syncs.push(sync);
+      return sync;
+    },
+    findUnique: async ({ where }: any) => {
+      return this.syncs.find((s) => s.id === where.id) || null;
+    },
+    update: async ({ where, data }: any) => {
+      const idx = this.syncs.findIndex((s) => s.id === where.id);
+      if (idx === -1) throw new Error('Sync not found');
+      this.syncs[idx] = { ...this.syncs[idx], ...data, updatedAt: new Date() };
+      return this.syncs[idx];
+    },
+    findMany: async ({ where }: any = {}) => {
+      return this.syncs.filter((s) => !where?.userId || s.userId === where.userId);
     },
   };
 }

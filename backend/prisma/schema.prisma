@@ -35,6 +35,7 @@ model Budget {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   transactions  Transaction[]
+  syncs         Sync[]
 
   @@unique([userId, month, year])
   @@index([userId])
@@ -72,17 +73,24 @@ model RefreshToken {
 }
 
 model Sync {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider    String
-  status      String    @default("pending")
-  lastSyncAt  DateTime?
-  error       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                   String    @id @default(cuid())
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  budgetId             String?
+  budget               Budget?   @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+  provider             String
+  status               String    @default("pending")
+  accountId            String?
+  transactionsFetched  Int       @default(0)
+  transactionsCreated  Int       @default(0)
+  duplicatesSkipped    Int       @default(0)
+  lastSyncAt           DateTime?
+  error                String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([userId])
+  @@index([budgetId])
 }
 
 model Premium {

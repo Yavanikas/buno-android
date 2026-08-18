@@ -1,4 +1,6 @@
 import http from 'http';
+import path from 'path';
+import { spawn, ChildProcess } from 'child_process';
 import app from './app';
 
 const PORT = 3099;
@@ -6,9 +8,10 @@ let server: http.Server;
 
 function request(
   method: string,
-  path: string,
+  pathName: string,
   body?: any,
-  token?: string
+  token?: string,
+  port: number = PORT
 ): Promise<{ status: number; body: any }> {
   return new Promise((resolve, reject) => {
     const postData = body ? JSON.stringify(body) : '';
@@ -23,8 +26,8 @@ function request(
     const req = http.request(
       {
         hostname: 'localhost',
-        port: PORT,
-        path,
+        port,
+        path: pathName,
         method,
         headers,
       },
@@ -89,6 +92,10 @@ async function runE2ETests() {
     let user1Token = regRes.body.data.accessToken;
     let user1RefreshToken = regRes.body.data.refreshToken;
     const user1Id = regRes.body.data.user.id;
+
+    // Small delay so the JWT `iat` differs from registration (JWT has 1s granularity,
+    // otherwise the refresh token would collide on the unique constraint).
+    await new Promise((r) => setTimeout(r, 1200));
 
     // 3. User 1 Duplicate Registration rejection
     console.log('\n--- 3. Duplicate Registration Rejection ---');
@@ -296,9 +303,168 @@ async function runE2ETests() {
     assert(persistedBudget.body.data.length === 1, 'Persisted budget intact after re-login');
 
     console.log('\n🎉 ALL BACKEND END-TO-END STEP 2 VERIFICATION TESTS PASSED!\n');
+
+    // STEP 3: Demo Bank + Automatic Transaction Sync verification
+    await runStep3SyncVerification();
   } finally {
     server.close();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3: DEMO BANK + AUTOMATIC TRANSACTION SYNC verification
+// ─────────────────────────────────────────────────────────────────────────────
+const DEMO_BANK_PORT = 4100;
+let demoBankProc: ChildProcess | null = null;
+
+function spawnDemoBank(): void {
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const entry = path.join(repoRoot, 'demobank', 'dist', 'server.js');
+  demoBankProc = spawn(process.execPath, [entry], {
+    env: { ...process.env, PORT: String(DEMO_BANK_PORT) },
+    stdio: 'ignore',
+  });
+}
+
+async function waitForDemoBank(timeoutMs = 15000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await request('GET', '/api/health', undefined, undefined, DEMO_BANK_PORT);
+      if (res.status === 200 && res.body.status === 'ok') return;
+    } catch (e) {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error('Demo Bank did not become healthy in time');
+}
+
+async function pollSyncStatus(syncId: string, token: string, maxAttempts = 40): Promise<any> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await request('GET', `/api/sync/${syncId}/status`, undefined, token);
+    assert(res.status === 200, `Sync status poll returned 200 (attempt ${i + 1})`);
+    if (res.body.status === 'success' || res.body.status === 'error') {
+      return res.body;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error('Sync did not finish in time');
+}
+
+async function runStep3SyncVerification(): Promise<void> {
+  console.log('\n========== STEP 3: DEMO BANK + AUTOMATIC TRANSACTION SYNC ==========');
+
+  // 0. Start the simulated Demo Bank service
+  spawnDemoBank();
+  await waitForDemoBank();
+  process.env.DEMO_BANK_BASE_URL = `http://localhost:${DEMO_BANK_PORT}/api`;
+  console.log(`✅ Demo Bank service running at ${process.env.DEMO_BANK_BASE_URL}`);
+
+  // 1. Create a demo account (direct Demo Bank call)
+  console.log('\n--- S3.1 Create demo account ---');
+  const createAcc = await request('POST', '/api/accounts', { userId: 'step3-user' }, undefined, DEMO_BANK_PORT);
+  assert(createAcc.status === 201, 'POST /api/accounts returns 201');
+  assert(!!createAcc.body.account?.id, 'Account has an id');
+  assert(createAcc.body.account.simulated === true, 'Account flagged as simulated');
+  const accountId = createAcc.body.account.id;
+  console.log(`✅ Demo account created: ${accountId}`);
+
+  // 2. Fetch demo transactions (direct Demo Bank call)
+  console.log('\n--- S3.2 Fetch demo transactions ---');
+  const txRes = await request('GET', `/api/accounts/${accountId}/transactions`, undefined, undefined, DEMO_BANK_PORT);
+  assert(txRes.status === 200, 'GET transactions returns 200');
+  assert(txRes.body.simulated === true, 'Transactions flagged as simulated');
+  const demoTx = txRes.body.transactions || [];
+  assert(demoTx.length > 100, `Got ~60 days of realistic data (${demoTx.length} transactions)`);
+  const categories = new Set(demoTx.map((t: any) => t.category));
+  for (const c of ['Income', 'Groceries', 'Food', 'Transport', 'Shopping', 'Entertainment', 'Utilities', 'Personal Care', 'Healthcare', 'Education']) {
+    assert(categories.has(c), `Category "${c}" present in demo data`);
+  }
+  const hasCredit = demoTx.some((t: any) => t.type === 'credit');
+  assert(hasCredit, 'Income (credit) transactions present');
+  console.log(`✅ Fetched ${demoTx.length} deterministic demo transactions across ${categories.size} categories`);
+
+  // 3. Sync through the Buno backend
+  console.log('\n--- S3.3 Sync through Buno backend ---');
+  const reg = await request('POST', '/api/auth/register', {
+    email: 'step3@example.com',
+    password: 'password123',
+    name: 'Step 3 User',
+  });
+  assert(reg.status === 201, 'Step 3 user registered');
+  const token = reg.body.data.accessToken;
+  const now = new Date();
+  const budget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 50000, currency: 'INR', month: now.getMonth() + 1, year: now.getFullYear() },
+    token
+  );
+  assert(budget.status === 201, 'Step 3 budget created');
+  const budgetId = budget.body.data.id;
+
+  const start = await request('POST', `/api/budgets/${budgetId}/sync/start`, {}, token);
+  assert(start.status === 202, 'POST sync/start returns 202 Accepted');
+  assert(!!start.body.syncId, 'syncId returned');
+  assert(start.body.provider === 'DemoBank', 'Provider identified as DemoBank');
+  const syncId = start.body.syncId;
+
+  const status = await pollSyncStatus(syncId, token);
+  assert(status.status === 'success', 'Sync completed successfully');
+  assert(!!status.accountId, 'Sync record carries the linked Demo Bank account');
+  assert(status.transactionsFetched > 0, 'transactionsFetched > 0');
+  assert(status.transactionsCreated === status.transactionsFetched, 'All fetched transactions were created');
+  assert(status.duplicatesSkipped === 0, 'No duplicates on first sync');
+
+  // Fetch the SAME account the sync used to cross-check the counts.
+  const syncTx = await request('GET', `/api/accounts/${status.accountId}/transactions`, undefined, undefined, DEMO_BANK_PORT);
+  const syncDemoTx = syncTx.body.transactions || [];
+  assert(status.transactionsFetched === syncDemoTx.length, 'transactionsFetched matches the synced Demo Bank account');
+  console.log(`✅ Sync success: fetched=${status.transactionsFetched} created=${status.transactionsCreated} skipped=${status.duplicatesSkipped}`);
+
+  // 4. Verify transactions are stored in PostgreSQL
+  console.log('\n--- S3.4 Verify transactions stored ---');
+  const stored = await request('GET', `/api/budgets/${budgetId}/transactions`, undefined, token);
+  assert(stored.status === 200, 'Stored transactions fetchable');
+  assert(stored.body.data.length === status.transactionsCreated, `Stored ${stored.body.data.length} transactions`);
+  const allDemobank = stored.body.data.every((t: any) => t.source === 'demobank');
+  assert(allDemobank, 'All synced transactions have source=demobank');
+  const storedCategories = new Set(stored.body.data.map((t: any) => t.category));
+  assert(storedCategories.has('Income'), 'Income stored as category');
+  assert(storedCategories.has('Groceries'), 'Groceries stored as category');
+  console.log(`✅ ${stored.body.data.length} transactions persisted with source=demobank`);
+
+  // 5. Android UI verification (manual on emulator)
+  console.log('\n--- S3.5 Android UI ---');
+  console.log('ℹ️ Manual step: open the Android app → Connect Bank → demo disclaimer → Connect → syncing → success → View Transactions.');
+
+  // 6. Run sync again → duplicates must be skipped
+  console.log('\n--- S3.6 Run sync again (duplicate detection) ---');
+  const start2 = await request('POST', `/api/budgets/${budgetId}/sync/start`, {}, token);
+  const syncId2 = start2.body.syncId;
+  const status2 = await pollSyncStatus(syncId2, token);
+  assert(status2.status === 'success', 'Second sync completed');
+  assert(status2.transactionsCreated === 0, 'No new transactions created on second sync');
+  assert(status2.duplicatesSkipped === status.transactionsFetched, 'All fetched transactions were skipped as duplicates');
+  console.log(`✅ Duplicate detection: created=0, skipped=${status2.duplicatesSkipped}`);
+
+  // 7. Demo Bank unavailable → graceful error handling
+  console.log('\n--- S3.7 Demo Bank unavailable → graceful error ---');
+  if (demoBankProc) {
+    demoBankProc.kill();
+    demoBankProc = null;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const start3 = await request('POST', `/api/budgets/${budgetId}/sync/start`, {}, token);
+  assert(start3.status === 202, 'Sync start still accepted when provider is down');
+  const syncId3 = start3.body.syncId;
+  const status3 = await pollSyncStatus(syncId3, token);
+  assert(status3.status === 'error', 'Sync marked as error when Demo Bank unavailable');
+  assert(!!status3.error, 'Sync record carries an error message');
+  console.log(`✅ Graceful failure handled: status=${status3.status}, error="${status3.error}"`);
+
+  console.log('\n🎉 STEP 3 SYNC VERIFICATION TESTS PASSED!\n');
 }
 
 runE2ETests().catch((err) => {

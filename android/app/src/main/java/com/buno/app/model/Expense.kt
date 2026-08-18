@@ -14,10 +14,16 @@ enum class ExpenseCategory(val displayName: String) {
     FOOD("Food"),
     TRANSPORT("Transport"),
     GROCERIES("Groceries"),
+    SHOPPING("Shopping"),
+    ENTERTAINMENT("Entertainment"),
+    UTILITIES("Utilities"),
+    PERSONAL_CARE("Personal Care"),
+    HEALTHCARE("Healthcare"),
+    EDUCATION("Education"),
+    INCOME("Income"),
     SUBSCRIPTIONS("Subscriptions"),
     ACADEMICS("Academics"),
     SOCIAL("Social"),
-    PERSONAL_CARE("Personal Care"),
     OTHER("Other");
 
     companion object {
