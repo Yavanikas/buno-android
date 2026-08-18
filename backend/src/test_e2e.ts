@@ -2,6 +2,7 @@ import http from 'http';
 import path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import app from './app';
+import { getDeterministicAdvice } from './utils/spendingAdvice';
 
 const PORT = 3099;
 let server: http.Server;
@@ -69,6 +70,12 @@ function assert(condition: boolean, msg: string) {
 async function runE2ETests() {
   server = app.listen(PORT);
   console.log(`Starting E2E verification server on port ${PORT}...`);
+
+  // Guarantee deterministic behavior until STEP 4B explicitly enables Groq.
+  delete process.env.GROQ_API_KEY;
+  delete process.env.GROQ_BASE_URL;
+  delete process.env.GROQ_MODEL;
+  delete process.env.GROQ_TIMEOUT_MS;
 
   try {
     // 1. Health check
@@ -309,7 +316,11 @@ async function runE2ETests() {
 
     // STEP 4A: Backend Spending Intelligence verification
     await runStep4IntelligenceVerification();
+
+    // STEP 4B: Groq AI + Response Safety verification
+    await runStep4BVerification();
   } finally {
+    await stopFakeGroq();
     server.close();
   }
 }
@@ -664,6 +675,463 @@ async function runStep4IntelligenceVerification(): Promise<void> {
   assert(noAuthPatterns.status === 401, 'Unauthenticated /patterns rejected (401)');
 
   console.log('\n🎉 STEP 4A SPENDING INTELLIGENCE VERIFICATION TESTS PASSED!\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4B: GROQ AI + RESPONSE SAFETY verification
+// A local fake Groq endpoint lets us exercise valid, malformed, slow, failing,
+// and leaking provider responses without touching the real API.
+// ─────────────────────────────────────────────────────────────────────────────
+const FAKE_GROQ_PORT = 4200;
+let fakeGroqServer: http.Server | null = null;
+let fakeGroqMode: string = 'error';
+let fakeGroqLastAuth: string = '';
+let fakeGroqLastBody: string = '';
+
+function respondJson(res: http.ServerResponse, status: number, payload: unknown): void {
+  try {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  } catch (e) {
+    // socket may already be destroyed after a client abort — ignore
+  }
+}
+
+function startFakeGroq(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    fakeGroqServer = http.createServer((req, res) => {
+      res.on('error', () => {});
+      req.on('error', () => {});
+
+      if (req.method !== 'POST' || !['/chat/completions', '/v1/chat/completions'].includes(req.url || '')) {
+        respondJson(res, 404, { error: 'not found' });
+        return;
+      }
+
+      fakeGroqLastAuth = String(req.headers.authorization || '');
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        fakeGroqLastBody = body;
+
+        if (fakeGroqMode === 'slow') {
+          setTimeout(
+            () =>
+              respondJson(res, 200, {
+                choices: [
+                  {
+                    message: {
+                      content: JSON.stringify({
+                        paceSummary: 'too late',
+                        monthOutlook: 'too late',
+                        todaySuggestion: 'too late',
+                      }),
+                    },
+                  },
+                ],
+              }),
+            5000
+          );
+          return;
+        }
+
+        if (fakeGroqMode === 'error') {
+          respondJson(res, 500, { error: 'simulated provider failure' });
+          return;
+        }
+
+        if (fakeGroqMode === 'malformed') {
+          respondJson(res, 200, {
+            choices: [{ message: { content: 'this is definitely not json' } }],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'empty') {
+          respondJson(res, 200, { choices: [{ message: { content: '' } }] });
+          return;
+        }
+
+        if (fakeGroqMode === 'symbol') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    paceSummary: 'You have ₹3,200 left.',
+                    monthOutlook: 'Fine.',
+                    todaySuggestion: 'Relax.',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'amount') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    paceSummary: 'You can spend 200 today.',
+                    monthOutlook: 'Fine.',
+                    todaySuggestion: 'Relax.',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'remaining') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    paceSummary: 'Your remaining balance is 4500.',
+                    monthOutlook: 'Fine.',
+                    todaySuggestion: 'Relax.',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'percent') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    paceSummary: 'You have used 40 percent of your budget.',
+                    monthOutlook: 'Fine.',
+                    todaySuggestion: 'Relax.',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'bad-tag') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    patternTag: 'Invented pattern',
+                    insight: 'Weekend spending seems higher recently.',
+                    confidence: 'high',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        if (fakeGroqMode === 'valid-pattern') {
+          respondJson(res, 200, {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    patternTag: 'Weekend pattern',
+                    insight: 'Weekend spending seems a bit higher than weekdays recently.',
+                    confidence: 'medium',
+                  }),
+                },
+              },
+            ],
+          });
+          return;
+        }
+
+        // default: valid qualitative advice
+        respondJson(res, 200, {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  paceSummary: 'Recent spending seems calm and steady.',
+                  monthOutlook: 'At this pace the month looks comfortable.',
+                  todaySuggestion: 'Keep one light day today to stay flexible.',
+                }),
+              },
+            },
+          ],
+        });
+      });
+    });
+
+    fakeGroqServer.once('error', reject);
+    fakeGroqServer.listen(FAKE_GROQ_PORT, () => resolve());
+  });
+}
+
+function stopFakeGroq(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!fakeGroqServer) {
+      resolve();
+      return;
+    }
+    const toClose = fakeGroqServer;
+    fakeGroqServer = null;
+    toClose.close(() => resolve());
+  });
+}
+
+async function runStep4BVerification(): Promise<void> {
+  console.log('\n========== STEP 4B: GROQ AI + RESPONSE SAFETY ==========');
+
+  // 0. Fresh user + budget with real activity
+  const reg = await request('POST', '/api/auth/register', {
+    email: 'step4c@example.com',
+    password: 'password123',
+    name: 'Step 4C User',
+  });
+  assert(reg.status === 201, 'Step 4C user registered');
+  const token = reg.body.data.accessToken;
+
+  const now = new Date();
+  const budget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 60000, currency: 'INR', month: now.getMonth() + 1, year: now.getFullYear() },
+    token
+  );
+  assert(budget.status === 201, 'Step 4C budget created');
+  const budgetId = budget.body.data.id;
+
+  await request(
+    'POST',
+    `/api/budgets/${budgetId}/transactions`,
+    { amount: 600, category: 'Food', note: 'Lunch', date: now.toISOString() },
+    token
+  );
+  await request(
+    'POST',
+    `/api/budgets/${budgetId}/transactions`,
+    { amount: 1200, category: 'Groceries', note: 'Weekly essentials', date: now.toISOString() },
+    token
+  );
+
+  // S4B.11 baseline: deterministic fallback when Groq is not configured
+  console.log('\n--- S4B.11 Deterministic fallback baseline ---');
+  delete process.env.GROQ_API_KEY;
+  const baselineAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(baselineAdvice.status === 200, 'Advice without Groq returns 200');
+  assert(
+    baselineAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'No-key advice equals deterministic fallback'
+  );
+
+  // Start the fake Groq provider
+  await startFakeGroq();
+  process.env.GROQ_API_KEY = 'test-key-not-secret';
+  process.env.GROQ_BASE_URL = `http://localhost:${FAKE_GROQ_PORT}/v1`;
+  process.env.GROQ_TIMEOUT_MS = '2000';
+
+  // S4B.1 + S4B.10: valid qualitative Groq advice is returned verbatim
+  console.log('\n--- S4B.1/10 Valid qualitative Groq advice ---');
+  fakeGroqMode = 'valid-advice';
+  const aiAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(aiAdvice.status === 200, 'POST /advice returns 200 with Groq enabled');
+  assert(
+    aiAdvice.body.data.paceSummary === 'Recent spending seems calm and steady.',
+    'Valid Groq advice is returned (not the fallback)'
+  );
+  assert(
+    typeof aiAdvice.body.data.monthOutlook === 'string' && typeof aiAdvice.body.data.todaySuggestion === 'string',
+    'Advice carries monthOutlook and todaySuggestion'
+  );
+  assert(!/[$₹€£¥\d]/.test(JSON.stringify(aiAdvice.body.data)), 'Valid advice contains no amounts or digits');
+
+  // Groq request carries only the server key; context has no hidden financial state
+  assert(fakeGroqLastAuth === 'Bearer test-key-not-secret', 'Groq request carries the server-side API key only');
+  const sentToGroq = (fakeGroqLastBody || '').toLowerCase();
+  assert(!sentToGroq.includes('remainingbudget'), 'Groq context never includes remainingBudget');
+  assert(!sentToGroq.includes('spentsofar'), 'Groq context never includes spentSoFar');
+  assert(!sentToGroq.includes('monthlylimit'), 'Groq context never includes monthlyLimit');
+  assert(!sentToGroq.includes('"amount"'), 'Groq context never includes raw amounts');
+  assert(
+    !sentToGroq.includes('password') && !sentToGroq.includes('"token"'),
+    'Groq context never includes secrets'
+  );
+
+  // S4B.2: malformed Groq JSON → deterministic fallback
+  console.log('\n--- S4B.2 Malformed Groq response ---');
+  fakeGroqMode = 'malformed';
+  const malformedAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    malformedAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Malformed Groq output falls back deterministically'
+  );
+
+  // S4B.2b: valid JSON but missing/empty fields → deterministic fallback
+  console.log('\n--- S4B.2b Empty Groq content ---');
+  fakeGroqMode = 'empty';
+  const emptyAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    emptyAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Empty Groq content falls back deterministically'
+  );
+
+  // S4B.3: Groq timeout → deterministic fallback
+  console.log('\n--- S4B.3 Groq timeout ---');
+  fakeGroqMode = 'slow';
+  const slowAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    slowAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Groq timeout falls back deterministically'
+  );
+
+  // S4B.4: Groq unavailable → deterministic fallback
+  console.log('\n--- S4B.4 Groq unavailable ---');
+  await stopFakeGroq();
+  const downAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    downAdvice.status === 200 && downAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Groq unavailable falls back deterministically'
+  );
+  await startFakeGroq();
+
+  // S4B.5: missing GROQ_API_KEY → deterministic fallback
+  console.log('\n--- S4B.5 Missing GROQ_API_KEY ---');
+  delete process.env.GROQ_API_KEY;
+  fakeGroqMode = 'valid-advice';
+  const noKeyAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    noKeyAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Missing GROQ_API_KEY falls back deterministically'
+  );
+  process.env.GROQ_API_KEY = 'test-key-not-secret';
+
+  // S4B.6: currency-symbol leakage → fallback
+  console.log('\n--- S4B.6 Currency-symbol leakage ---');
+  fakeGroqMode = 'symbol';
+  const symbolAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    symbolAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Currency-symbol content is rejected'
+  );
+
+  // S4B.7: exact money amount → fallback
+  console.log('\n--- S4B.7 Exact money amount leakage ---');
+  fakeGroqMode = 'amount';
+  const amountAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    amountAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Exact-amount content is rejected'
+  );
+
+  // S4B.8: remaining-balance statement → fallback
+  console.log('\n--- S4B.8 Remaining-balance leakage ---');
+  fakeGroqMode = 'remaining';
+  const remainingAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    remainingAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Remaining-balance statement is rejected'
+  );
+
+  // S4B.9: percentage leakage → fallback
+  console.log('\n--- S4B.9 Percentage leakage ---');
+  fakeGroqMode = 'percent';
+  const percentAdvice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    percentAdvice.body.data.paceSummary === getDeterministicAdvice('safe').paceSummary,
+    'Percentage content is rejected'
+  );
+
+  // S4B.11: fallback is stable and identical to the baseline
+  console.log('\n--- S4B.11 Deterministic fallback stability ---');
+  const fallbackAgain = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(
+    JSON.stringify(fallbackAgain.body.data) === JSON.stringify(baselineAdvice.body.data),
+    'Fallback payload is deterministic and stable'
+  );
+
+  // /patterns: valid AI interpretation + invalid tag falls back
+  console.log('\n--- S4B Patterns insight (valid + invalid) ---');
+  fakeGroqMode = 'valid-pattern';
+  const patternsOk = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, token);
+  assert(patternsOk.status === 200, 'POST /patterns returns 200 with Groq enabled');
+  assert(patternsOk.body.data.insight.patternTag === 'Weekend pattern', 'AI pattern tag is used');
+  assert(patternsOk.body.data.insight.confidence === 'medium', 'AI confidence is used');
+  assert(['low', 'medium', 'high'].includes(patternsOk.body.data.insight.confidence), 'Confidence is an allowed enum');
+  assert(patternsOk.body.data.recentExpenseCount === 2, 'Deterministic pattern data remains the source of truth');
+  assert(!/[$₹€£¥\d]/.test(patternsOk.body.data.insight.insight), 'Pattern insight contains no amounts or digits');
+
+  fakeGroqMode = 'bad-tag';
+  const patternsFallback = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, token);
+  assert(
+    patternsFallback.body.data.insight.patternTag === 'Recent activity',
+    'Disallowed pattern tag falls back to the safe insight'
+  );
+
+  // Insufficient data → deterministic fallback insight without calling Groq
+  console.log('\n--- S4B Patterns empty history fallback ---');
+  const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+  const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const emptyBudget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 20000, currency: 'INR', month: prevMonth, year: prevYear },
+    token
+  );
+  fakeGroqMode = 'valid-pattern';
+  const emptyPatterns = await request('POST', `/api/budgets/${emptyBudget.body.data.id}/patterns`, {}, token);
+  assert(emptyPatterns.body.data.insight.patternTag === 'Recent activity', 'Empty history uses deterministic fallback insight');
+
+  // S4B.12: authenticated user can only reach their own budget
+  console.log('\n--- S4B.12 Cross-user isolation with Groq active ---');
+  const regU2 = await request('POST', '/api/auth/register', {
+    email: 'step4d@example.com',
+    password: 'password123',
+    name: 'Step 4D User',
+  });
+  const u2Token = regU2.body.data.accessToken;
+  const u2Advice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, u2Token);
+  assert(u2Advice.status === 404, 'Cross-user /advice denied (404)');
+  const u2Patterns = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, u2Token);
+  assert(u2Patterns.status === 404, 'Cross-user /patterns denied (404)');
+
+  // S4B.13: API never returns internal calculation fields
+  console.log('\n--- S4B.13 No internal calculation fields leak ---');
+  fakeGroqMode = 'valid-advice';
+  const advResp = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  const patResp = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, token);
+  for (const resp of [advResp, patResp]) {
+    const dataText = JSON.stringify(resp.body.data).toLowerCase();
+    for (const forbidden of [
+      'spentsofar',
+      'remainingbudget',
+      'remainingbalance',
+      'balance',
+      'allowance',
+      'monthlylimit',
+      'totalbudget',
+      'budgetremainder',
+    ]) {
+      assert(!dataText.includes(forbidden), `Response hides "${forbidden}"`);
+    }
+  }
+
+  // Cleanup
+  delete process.env.GROQ_API_KEY;
+  delete process.env.GROQ_BASE_URL;
+  delete process.env.GROQ_MODEL;
+  delete process.env.GROQ_TIMEOUT_MS;
+  await stopFakeGroq();
+
+  console.log('\n🎉 STEP 4B GROQ AI + RESPONSE SAFETY VERIFICATION TESTS PASSED!\n');
 }
 
 runE2ETests().catch((err) => {

@@ -2,6 +2,9 @@ import { computeQualitativeState } from '../utils/qualitative';
 import { getBudgetState, getRemainingDays, type RiskLabel } from '../utils/spendingCalc';
 import { getRecentPatternSummary, type PatternSummary } from '../utils/spendingPatterns';
 import { getDeterministicAdvice, type AdvicePayload } from '../utils/spendingAdvice';
+import { FALLBACK_PATTERN_INSIGHT, type PatternInsightPayload } from './ai/safety';
+import { buildAdviceContext, getGroqAdvice } from './ai/groqAdvice';
+import { getGroqPatternInsight } from './ai/groqPatternInsight';
 
 const INCOME_CATEGORY = 'income';
 
@@ -87,23 +90,41 @@ export function buildStateResponse(budget: any, transactions: any[]): BudgetStat
 
 export type PatternsResponse = {
   budgetId: string;
+  insight: PatternInsightPayload;
 } & PatternSummary;
 
-// Deterministic pattern extraction is the source of truth. It reveals which
-// behaviour stood out this month and never exposes amounts or balances.
-export function buildPatternsResponse(budget: any, transactions: any[]): PatternsResponse {
+// Deterministic pattern extraction remains the source of truth. Groq adds a
+// qualitative interpretation only when there is real activity; any failure
+// falls back to the deterministic insight.
+export async function buildPatternsResponse(budget: any, transactions: any[]): Promise<PatternsResponse> {
   const { patterns } = getAnalysis(budget, transactions);
+
+  let insight: PatternInsightPayload = FALLBACK_PATTERN_INSIGHT;
+  if (patterns.recentExpenseCount > 0) {
+    insight = (await getGroqPatternInsight(patterns)) ?? FALLBACK_PATTERN_INSIGHT;
+  }
 
   return {
     budgetId: budget.id,
     ...patterns,
+    insight,
   };
 }
 
-// Advice is derived deterministically from the qualitative state, keyed on the
-// risk label. It never contains amounts, percentages, or remaining balances.
-export function buildAdviceResponse(budget: any, transactions: any[]): AdvicePayload {
-  const { state } = getAnalysis(budget, transactions);
+// Advice prefers validated Groq output and always falls back to the
+// deterministic qualitative advice keyed on risk when Groq is unavailable,
+// unsafe, malformed, or unconfigured.
+export async function buildAdviceResponse(budget: any, transactions: any[]): Promise<AdvicePayload> {
+  const { remainingDays, state, patterns } = getAnalysis(budget, transactions);
+
+  if (patterns.recentExpenseCount > 0) {
+    const aiAdvice = await getGroqAdvice(
+      buildAdviceContext({ state, patterns, daysRemaining: remainingDays })
+    );
+    if (aiAdvice) {
+      return aiAdvice;
+    }
+  }
 
   return getDeterministicAdvice(state.riskLabel);
 }

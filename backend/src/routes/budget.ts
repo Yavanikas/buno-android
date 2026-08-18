@@ -324,9 +324,11 @@ router.delete(
   }
 );
 
-// ─── STEP 4A: Spending Intelligence (hide the number, reveal the signal) ─────
+// ─── STEP 4A/4B: Spending Intelligence (hide the number, reveal the signal) ──
 // These endpoints reveal qualitative signals only. They never return spent
-// amounts, remaining balances, or exact allowances.
+// amounts, remaining balances, or exact allowances. /patterns and /advice may
+// use Groq for qualitative interpretation, but deterministic analytics remain
+// the source of truth and any unsafe/unavailable Groq output falls back safely.
 
 async function getOwnedBudget(req: AuthRequest, res: Response): Promise<any | null> {
   const { id } = req.params;
@@ -387,7 +389,7 @@ router.post(
 
       res.status(200).json({
         status: 'success',
-        data: buildPatternsResponse(budget, transactions),
+        data: await buildPatternsResponse(budget, transactions),
       });
     } catch (err) {
       next(err);
@@ -410,7 +412,7 @@ router.post(
 
       res.status(200).json({
         status: 'success',
-        data: buildAdviceResponse(budget, transactions),
+        data: await buildAdviceResponse(budget, transactions),
       });
     } catch (err) {
       next(err);
