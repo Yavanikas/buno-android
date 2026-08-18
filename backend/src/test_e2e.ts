@@ -306,6 +306,9 @@ async function runE2ETests() {
 
     // STEP 3: Demo Bank + Automatic Transaction Sync verification
     await runStep3SyncVerification();
+
+    // STEP 4A: Backend Spending Intelligence verification
+    await runStep4IntelligenceVerification();
   } finally {
     server.close();
   }
@@ -465,6 +468,202 @@ async function runStep3SyncVerification(): Promise<void> {
   console.log(`✅ Graceful failure handled: status=${status3.status}, error="${status3.error}"`);
 
   console.log('\n🎉 STEP 3 SYNC VERIFICATION TESTS PASSED!\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4A: BACKEND SPENDING INTELLIGENCE verification
+// "Hide the number, reveal the signal." These endpoints must never expose exact
+// remaining-budget values (spentSoFar, remainingBudget, balances, allowances).
+// ─────────────────────────────────────────────────────────────────────────────
+async function runStep4IntelligenceVerification(): Promise<void> {
+  console.log('\n========== STEP 4A: BACKEND SPENDING INTELLIGENCE ==========');
+
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+  const nextMonthYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+  const pastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+  const pastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+  // 0. Register a dedicated user
+  const reg = await request('POST', '/api/auth/register', {
+    email: 'step4@example.com',
+    password: 'password123',
+    name: 'Step 4 User',
+  });
+  assert(reg.status === 201, 'Step 4 user registered');
+  const token = reg.body.data.accessToken;
+
+  // 1. Empty history is handled safely
+  console.log('\n--- S4.1 State on empty history ---');
+  const budgetRes = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 50000, currency: 'INR', month: currentMonth, year: currentYear },
+    token
+  );
+  assert(budgetRes.status === 201, 'Step 4 budget created');
+  const budgetId = budgetRes.body.data.id;
+
+  const emptyState = await request('POST', `/api/budgets/${budgetId}/state`, {}, token);
+  assert(emptyState.status === 200, 'POST /state on empty budget returns 200');
+  assert(['safe', 'watchful', 'fragile'].includes(emptyState.body.data.riskLabel), 'State returns a valid qualitative risk label');
+  assert(emptyState.body.data.expensesLogged === 0, 'Empty history reports 0 expenses logged');
+  assert(emptyState.body.data.spentSoFar === undefined, 'State hides spentSoFar');
+  assert(emptyState.body.data.remainingBudget === undefined, 'State hides remainingBudget');
+  assert(emptyState.body.data.remainingBalance === undefined, 'State hides remainingBalance');
+  assert(emptyState.body.data.balance === undefined, 'State hides balance');
+  assert(emptyState.body.data.allowance === undefined, 'State hides exact allowance');
+
+  // 2. Expenses are counted
+  console.log('\n--- S4.2 Expenses counted ---');
+  await request(
+    'POST',
+    `/api/budgets/${budgetId}/transactions`,
+    { amount: 500, category: 'Food', note: 'Lunch', date: now.toISOString() },
+    token
+  );
+  await request(
+    'POST',
+    `/api/budgets/${budgetId}/transactions`,
+    { amount: 1000, category: 'Groceries', note: 'Weekly essentials', date: now.toISOString() },
+    token
+  );
+  const stateWithTx = await request('POST', `/api/budgets/${budgetId}/state`, {}, token);
+  assert(stateWithTx.body.data.expensesLogged === 2, 'State counts logged expenses');
+
+  // 3. Income must not be counted as an expense
+  console.log('\n--- S4.3 Income excluded ---');
+  await request(
+    'POST',
+    `/api/budgets/${budgetId}/transactions`,
+    { amount: 50000, category: 'Income', note: 'Salary', date: now.toISOString() },
+    token
+  );
+  const stateAfterIncome = await request('POST', `/api/budgets/${budgetId}/state`, {}, token);
+  assert(stateAfterIncome.body.data.expensesLogged === 2, 'Income is not counted as an expense');
+  const patternsWithIncome = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, token);
+  assert(patternsWithIncome.body.data.recentExpenseCount === 2, 'Income excluded from pattern analysis');
+
+  // 4. Patterns response is structured and qualitative
+  console.log('\n--- S4.4 Patterns response structured ---');
+  const patterns = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, token);
+  assert(patterns.status === 200, 'POST /patterns returns 200');
+  assert(patterns.body.data.recentExpenseCount === 2, 'Patterns count recent expenses');
+  assert(typeof patterns.body.data.topCategoryByFrequency === 'string', 'Patterns include a top category by frequency');
+  assert(typeof patterns.body.data.topCategoryByTotalSpend === 'string', 'Patterns include a top category by spend');
+  assert(typeof patterns.body.data.spendingRhythm === 'string', 'Patterns include a spending rhythm');
+  assert(Array.isArray(patterns.body.data.expenseSample), 'Patterns include an expense sample');
+  assert(patterns.body.data.expenseSample.length > 0, 'Expense sample is populated');
+  const sampleSizes: string[] = (patterns.body.data.expenseSample || []).map((s: any) => String(s?.size));
+  for (const size of sampleSizes) {
+    assert(['small', 'medium', 'larger'].includes(size), 'Expense sample sizes are qualitative buckets only');
+  }
+  assert(patterns.body.data.spentSoFar === undefined, 'Patterns hide spentSoFar');
+  assert(patterns.body.data.totalSpent === undefined, 'Patterns hide totalSpent');
+  assert(patterns.body.data.remainingBudget === undefined, 'Patterns hide remainingBudget');
+
+  // 5. Signals are scoped to the requested budget
+  console.log('\n--- S4.5 Budget scoping ---');
+  const otherBudget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 30000, currency: 'INR', month: nextMonth, year: nextMonthYear },
+    token
+  );
+  assert(otherBudget.status === 201, 'Other-month budget created');
+  await request(
+    'POST',
+    `/api/budgets/${otherBudget.body.data.id}/transactions`,
+    { amount: 9999, category: 'Shopping', date: now.toISOString() },
+    token
+  );
+  const stateScoped = await request('POST', `/api/budgets/${budgetId}/state`, {}, token);
+  assert(stateScoped.body.data.expensesLogged === 2, 'State stays scoped to the budget (other budget ignored)');
+  const otherPatterns = await request('POST', `/api/budgets/${otherBudget.body.data.id}/patterns`, {}, token);
+  assert(otherPatterns.body.data.recentExpenseCount === 1, 'Other budget patterns reflect only its own transactions');
+
+  // 6. Insufficient data falls back gracefully
+  console.log('\n--- S4.6 Insufficient-data fallback ---');
+  const emptyBudget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 40000, currency: 'INR', month: pastMonth, year: pastMonthYear },
+    token
+  );
+  const emptyPatterns = await request('POST', `/api/budgets/${emptyBudget.body.data.id}/patterns`, {}, token);
+  assert(emptyPatterns.status === 200, 'Patterns on empty history returns 200');
+  assert(emptyPatterns.body.data.recentExpenseCount === 0, 'Empty history reports 0 recent expenses');
+  assert(emptyPatterns.body.data.topCategoryByFrequency === 'not enough data', 'Fallback: top category is "not enough data"');
+  assert(emptyPatterns.body.data.spendingRhythm === 'not enough data', 'Fallback: spending rhythm is "not enough data"');
+  const emptyAdvice = await request('POST', `/api/budgets/${emptyBudget.body.data.id}/advice`, {}, token);
+  assert(emptyAdvice.status === 200, 'Advice on empty history returns 200');
+
+  // 7. Zero remaining days must not divide by zero
+  console.log('\n--- S4.7 Zero remaining days handled ---');
+  const pastBudget = await request(
+    'POST',
+    '/api/budgets',
+    { monthlyLimit: 20000, currency: 'INR', month: 1, year: 2024 },
+    token
+  );
+  assert(pastBudget.status === 201, 'Fully-past budget created');
+  const pastState = await request('POST', `/api/budgets/${pastBudget.body.data.id}/state`, {}, token);
+  assert(pastState.status === 200, 'State on a fully-past budget does not crash');
+  const pastPatterns = await request('POST', `/api/budgets/${pastBudget.body.data.id}/patterns`, {}, token);
+  assert(pastPatterns.status === 200, 'Patterns on a fully-past budget does not crash');
+  assert(pastPatterns.body.data.daysRemaining === 0, 'Past budget reports 0 remaining days');
+  assert(pastPatterns.body.data.riskLabel === 'fragile', 'Past budget reports fragile risk');
+  const pastAdvice = await request('POST', `/api/budgets/${pastBudget.body.data.id}/advice`, {}, token);
+  assert(pastAdvice.status === 200, 'Advice on a fully-past budget does not crash');
+
+  // 8. Advice is a deterministic, amount-free qualitative fallback
+  console.log('\n--- S4.8 Advice deterministic fallback ---');
+  const advice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(advice.status === 200, 'POST /advice returns 200');
+  assert(typeof advice.body.data.paceSummary === 'string' && advice.body.data.paceSummary.length > 0, 'Advice includes paceSummary');
+  assert(typeof advice.body.data.monthOutlook === 'string' && advice.body.data.monthOutlook.length > 0, 'Advice includes monthOutlook');
+  assert(typeof advice.body.data.todaySuggestion === 'string' && advice.body.data.todaySuggestion.length > 0, 'Advice includes todaySuggestion');
+  const adviceText = JSON.stringify(advice.body.data);
+  assert(!/[$₹]|\brs\.?\b|\brupees?\b|\busd\b|\bdollars?\b|\bcents?\b|\b\d+\b/.test(adviceText), 'Advice contains no exact amounts or numbers');
+  const adviceAgain = await request('POST', `/api/budgets/${budgetId}/advice`, {}, token);
+  assert(JSON.stringify(adviceAgain.body.data) === JSON.stringify(advice.body.data), 'Advice is deterministic across calls');
+
+  // 9. Soft-deleted transactions are ignored (no phantom expenses)
+  console.log('\n--- S4.9 Deleted transactions ignored ---');
+  const txList = await request('GET', `/api/budgets/${budgetId}/transactions`, undefined, token);
+  const delTarget = txList.body.data.find((t: any) => t.category === 'groceries');
+  assert(!!delTarget, 'Found groceries transaction to delete');
+  const delRes = await request('DELETE', `/api/budgets/${budgetId}/transactions/${delTarget.id}`, undefined, token);
+  assert(delRes.status === 200, 'Transaction deleted');
+  const stateAfterDelete = await request('POST', `/api/budgets/${budgetId}/state`, {}, token);
+  assert(stateAfterDelete.body.data.expensesLogged === 1, 'Deleted transaction no longer counted in state');
+
+  // 10. Cross-user isolation returns 404 for all intelligence endpoints
+  console.log('\n--- S4.10 Cross-user isolation ---');
+  const regU2 = await request('POST', '/api/auth/register', {
+    email: 'step4b@example.com',
+    password: 'password123',
+    name: 'Step 4B User',
+  });
+  assert(regU2.status === 201, 'Second user registered');
+  const u2Token = regU2.body.data.accessToken;
+  const u2State = await request('POST', `/api/budgets/${budgetId}/state`, {}, u2Token);
+  assert(u2State.status === 404, 'Cross-user /state denied (404)');
+  const u2Patterns = await request('POST', `/api/budgets/${budgetId}/patterns`, {}, u2Token);
+  assert(u2Patterns.status === 404, 'Cross-user /patterns denied (404)');
+  const u2Advice = await request('POST', `/api/budgets/${budgetId}/advice`, {}, u2Token);
+  assert(u2Advice.status === 404, 'Cross-user /advice denied (404)');
+
+  // 11. Unauthenticated requests are rejected
+  console.log('\n--- S4.11 Unauthenticated rejected ---');
+  const noAuthState = await request('POST', `/api/budgets/${budgetId}/state`, {});
+  assert(noAuthState.status === 401, 'Unauthenticated /state rejected (401)');
+  const noAuthPatterns = await request('POST', `/api/budgets/${budgetId}/patterns`, {});
+  assert(noAuthPatterns.status === 401, 'Unauthenticated /patterns rejected (401)');
+
+  console.log('\n🎉 STEP 4A SPENDING INTELLIGENCE VERIFICATION TESTS PASSED!\n');
 }
 
 runE2ETests().catch((err) => {
