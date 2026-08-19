@@ -89,4 +89,14 @@ interface BunoApiService {
 
     @GET("api/v1/insights/advice")
     suspend fun getAdvice(): Response<ApiResponse<AdviceResponse>>
+
+    // ─── Sync ────────────────────────────────────────────────────────────────
+    @POST("api/budgets/{budgetId}/sync/start")
+    suspend fun startSync(@Path("budgetId") budgetId: String): Response<com.buno.app.network.dto.SyncStartResponse>
+
+    @GET("api/sync/{syncId}/status")
+    suspend fun getSyncStatus(@Path("syncId") syncId: String): Response<com.buno.app.network.dto.SyncStatusResponse>
+
+    @POST("api/sync/{syncId}/acknowledge")
+    suspend fun acknowledgeSync(@Path("syncId") syncId: String): Response<com.buno.app.network.dto.SyncAcknowledgeResponse>
 }

@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { computeQualitativeState } from '../utils/qualitative';
 import { logAudit } from '../utils/audit';
+import { buildStateResponse, buildPatternsResponse, buildAdviceResponse } from '../lib/spendingIntel';
 import transactionsRouter from './transactions';
 
 const router = Router();
@@ -316,6 +317,102 @@ router.delete(
       res.status(200).json({
         status: 'success',
         message: 'Budget deleted successfully',
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ─── STEP 4A/4B: Spending Intelligence (hide the number, reveal the signal) ──
+// These endpoints reveal qualitative signals only. They never return spent
+// amounts, remaining balances, or exact allowances. /patterns and /advice may
+// use Groq for qualitative interpretation, but deterministic analytics remain
+// the source of truth and any unsafe/unavailable Groq output falls back safely.
+
+async function getOwnedBudget(req: AuthRequest, res: Response): Promise<any | null> {
+  const { id } = req.params;
+  const budget = await prisma.budget.findUnique({ where: { id } });
+
+  if (!budget || budget.userId !== req.userId) {
+    res.status(404).json({
+      status: 'error',
+      message: 'Budget not found or access denied',
+    });
+    return null;
+  }
+
+  return budget;
+}
+
+async function getBudgetTransactions(req: AuthRequest, budgetId: string): Promise<any[]> {
+  return prisma.transaction.findMany({
+    where: { budgetId, userId: req.userId },
+  });
+}
+
+// ─── POST /api/budgets/:id/state ──────────────────────────────────────────────
+router.post(
+  '/:id/state',
+  requireAuth,
+  [param('id').notEmpty().withMessage('Budget ID is required')],
+  validate,
+  async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const budget = await getOwnedBudget(req, res);
+      if (!budget) return;
+
+      const transactions = await getBudgetTransactions(req, budget.id);
+
+      res.status(200).json({
+        status: 'success',
+        data: buildStateResponse(budget, transactions),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ─── POST /api/budgets/:id/patterns ───────────────────────────────────────────
+router.post(
+  '/:id/patterns',
+  requireAuth,
+  [param('id').notEmpty().withMessage('Budget ID is required')],
+  validate,
+  async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const budget = await getOwnedBudget(req, res);
+      if (!budget) return;
+
+      const transactions = await getBudgetTransactions(req, budget.id);
+
+      res.status(200).json({
+        status: 'success',
+        data: await buildPatternsResponse(budget, transactions),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ─── POST /api/budgets/:id/advice ─────────────────────────────────────────────
+router.post(
+  '/:id/advice',
+  requireAuth,
+  [param('id').notEmpty().withMessage('Budget ID is required')],
+  validate,
+  async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const budget = await getOwnedBudget(req, res);
+      if (!budget) return;
+
+      const transactions = await getBudgetTransactions(req, budget.id);
+
+      res.status(200).json({
+        status: 'success',
+        data: await buildAdviceResponse(budget, transactions),
       });
     } catch (err) {
       next(err);

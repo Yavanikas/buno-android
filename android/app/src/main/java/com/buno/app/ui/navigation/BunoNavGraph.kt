@@ -94,7 +94,10 @@ fun BunoNavGraph(
         }
 
         composable(Screen.BankSync.route) {
-            BankSyncScreen(onBack = { navController.popBackStack() })
+            BankSyncScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToTransactions = { navController.navigate(Screen.Transactions.route) }
+            )
         }
 
         composable(Screen.Patterns.route) {
